@@ -2,7 +2,19 @@
 #include <iostream> // For std::cout
 
 MainComponent::MainComponent()
+    : appState(IDs::APP_STATE), // Initialize ValueTree with a type
+      settingsPanel(appState) // Pass appState to SettingsPanelXLComponent constructor
 {
+    // Initialize application state with default values
+    // Check if properties already exist (e.g. loaded from saved state)
+    // For now, we'll set them if they don't, or ensure they are there.
+    // Proper load/save will be handled by AudioProcessor.
+    if (!appState.hasProperty(IDs::INVERSION_SELECTED))
+        appState.setProperty(IDs::INVERSION_SELECTED, false, nullptr);
+    if (!appState.hasProperty(IDs::INVERSION_VALUE))
+        appState.setProperty(IDs::INVERSION_VALUE, 0, nullptr);
+    // More properties will be added here later...
+
     // Set background color to black
     setOpaque(true);
     getLookAndFeel().setColour(juce::ResizableWindow::backgroundColourId, juce::Colours::black);
@@ -57,11 +69,21 @@ MainComponent::MainComponent()
     buttonStyle(minusButton);
 
     plusButton.onClick = [this] {
-        // Handle plus button click
+        if (isInvSelected) {
+            int newValue = currentInvValue + 1;
+            if (newValue > 3) newValue = 3; // Limit to +3
+            settingsPanel.setInversionValue(newValue);
+            // MainComponent::currentInvValue will be updated via the inversionSelectionChanged callback
+        }
         std::cout << "Plus button clicked" << std::endl;
     };
     minusButton.onClick = [this] {
-        // Handle minus button click
+        if (isInvSelected) {
+            int newValue = currentInvValue - 1;
+            if (newValue < -2) newValue = -2; // Limit to -2
+            settingsPanel.setInversionValue(newValue);
+            // MainComponent::currentInvValue will be updated via the inversionSelectionChanged callback
+        }
         std::cout << "Minus button clicked" << std::endl;
     };
 
@@ -101,12 +123,15 @@ MainComponent::MainComponent()
 
 void MainComponent::inversionSelectionChanged(bool isSelected, int value)
 {
+    isInvSelected = isSelected;
+    currentInvValue = value; // Update MainComponent's copy of the value
+
     // Enable/disable plus/minus buttons based on selection state
     plusButton.setEnabled(isSelected);
     minusButton.setEnabled(isSelected);
     
     std::cout << "Inversion selection changed - Selected: " << (isSelected ? "yes" : "no") 
-              << ", Value: " << value << std::endl;
+              << ", Value: " << currentInvValue << std::endl;
 }
 
 MainComponent::~MainComponent()

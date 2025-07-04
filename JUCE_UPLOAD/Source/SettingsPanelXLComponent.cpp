@@ -1,12 +1,17 @@
 #include "SettingsPanelXLComponent.h"
 #include <iostream>
 
-SettingsPanelXLComponent::SettingsPanelXLComponent()
+// Constructor updated to take ValueTree
+SettingsPanelXLComponent::SettingsPanelXLComponent(juce::ValueTree applicationState)
+    : appState(applicationState) // Store the ValueTree
 {
+    // Add this component as a listener to the appState ValueTree
+    appState.addListener(this);
+
     // Set initial size
     setSize(928, static_cast<int>(panelHeight));
 
-    // Initialize buttons
+    // Initialize buttons (rest of the constructor is similar)
     addAndMakeVisible(eyeButton);
     eyeButton.setBackgroundColour(buttonColor);
     eyeButton.setBorderColour(buttonBorder);
@@ -27,7 +32,6 @@ SettingsPanelXLComponent::SettingsPanelXLComponent()
     bassOffsetButton.setBackgroundColour(buttonColor);
     bassOffsetButton.setBorderColour(buttonBorder);
 
-    // Initialize combo boxes with custom look and feel
     instrumentSelector.setLookAndFeel(&customLookAndFeel);
     addAndMakeVisible(instrumentSelector);
     instrumentSelector.addItem("BALAFON", 1);
@@ -40,7 +44,6 @@ SettingsPanelXLComponent::SettingsPanelXLComponent()
     modeSelector.addListener(this);
     modeSelector.getProperties().set("isSelected", false);
 
-    // Initialize key labels
     addAndMakeVisible(keyLabel);
     keyLabel.setText("KEY", juce::dontSendNotification);
     keyLabel.setFont(smallLabelFont);
@@ -53,7 +56,6 @@ SettingsPanelXLComponent::SettingsPanelXLComponent()
     keyValueLabel.setColour(juce::Label::textColourId, textColor);
     keyValueLabel.setJustificationType(juce::Justification::centred);
 
-    // Initialize octave labels
     addAndMakeVisible(octaveLabel);
     octaveLabel.setText("OCT", juce::dontSendNotification);
     octaveLabel.setFont(smallLabelFont);
@@ -61,12 +63,11 @@ SettingsPanelXLComponent::SettingsPanelXLComponent()
     octaveLabel.setJustificationType(juce::Justification::centred);
 
     addAndMakeVisible(octaveValueLabel);
-    octaveValueLabel.setText("0", juce::dontSendNotification);
+    octaveValueLabel.setText("0", juce::dontSendNotification); // Will be updated by ValueTree listener
     octaveValueLabel.setFont(displayFont);
     octaveValueLabel.setColour(juce::Label::textColourId, textColor);
     octaveValueLabel.setJustificationType(juce::Justification::centred);
 
-    // Initialize inversion labels
     addAndMakeVisible(inversionLabel);
     inversionLabel.setText("INV", juce::dontSendNotification);
     inversionLabel.setFont(smallLabelFont);
@@ -74,60 +75,224 @@ SettingsPanelXLComponent::SettingsPanelXLComponent()
     inversionLabel.setJustificationType(juce::Justification::centred);
 
     addAndMakeVisible(inversionValueLabel);
-    inversionValueLabel.setText("0", juce::dontSendNotification);
+    // Initialize text from appState
+    inversionValueLabel.setText(juce::String(appState.getProperty(IDs::INVERSION_VALUE, 0)), juce::dontSendNotification);
     inversionValueLabel.setFont(displayFont);
     inversionValueLabel.setColour(juce::Label::textColourId, textColor);
     inversionValueLabel.setJustificationType(juce::Justification::centred);
 
-    // Initialize chord label
     addAndMakeVisible(chordLabel);
     chordLabel.setText("CHORD", juce::dontSendNotification);
     chordLabel.setFont(smallLabelFont);
     chordLabel.setColour(juce::Label::textColourId, labelColor);
     chordLabel.setJustificationType(juce::Justification::centred);
 
-    // Initialize chord display
     addAndMakeVisible(chordDisplay);
     chordDisplay.setText("C#", juce::dontSendNotification);
     chordDisplay.setFont(chordDisplayFont);
     chordDisplay.setColour(juce::Label::textColourId, textColor);
     chordDisplay.setJustificationType(juce::Justification::centred);
 
-    // Add mouse listeners for selectable labels
     createSelectableContainer(keyLabel, keyValueLabel, "key");
     createSelectableContainer(octaveLabel, octaveValueLabel, "octave");
     createSelectableContainer(inversionLabel, inversionValueLabel, "inversion");
+
+    // Manually call valueTreePropertyChanged for initial setup of inversion selection visuals
+    // This ensures the visual state matches the initial ValueTree state.
+    // We need to ensure selectedControl is also initialized if needed for the logic in VTPC.
+    // If appState says inversion is selected, then selectedControl should also be "inversion".
+    if (appState.isValid() && (bool)appState.getProperty(IDs::INVERSION_SELECTED, false)) {
+        selectedControl = "inversion";
+    }
+
+    if (appState.isValid()) {
+        valueTreePropertyChanged(appState, IDs::INVERSION_SELECTED);
+        valueTreePropertyChanged(appState, IDs::INVERSION_VALUE);
+    }
 }
 
-void SettingsPanelXLComponent::createSelectableContainer(juce::Label& label, juce::Label& value, const juce::String& controlName)
+// Destructor
+SettingsPanelXLComponent::~SettingsPanelXLComponent()
 {
-    // Make both labels mouse-enabled
-    label.setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    value.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    if (appState.isValid()) // Check if appState is valid before removing listener
+        appState.removeListener(this);
+    instrumentSelector.setLookAndFeel(nullptr);
+    modeSelector.setLookAndFeel(nullptr);
+    modeSelector.removeListener(this);
+}
 
-    // Add click handlers
-    label.setInterceptsMouseClicks(true, false);
-    value.setInterceptsMouseClicks(true, false);
+// Method to get current inversion value from ValueTree
+int SettingsPanelXLComponent::getInversionValue() const
+{
+    if (!appState.isValid()) return 0; // Default if appState is not valid
+    return appState.getProperty(IDs::INVERSION_VALUE, 0);
+}
 
-    // Store the control name in the label's name property for identification
-    label.setName(controlName);
-    value.setName(controlName);
+void SettingsPanelXLComponent::setSelectedControl(const juce::String& control)
+{
+    if (selectedControl != control)
+    {
+        juce::String oldSelectedControl = selectedControl;
+        selectedControl = control;
 
-    // Set initial colors
-    label.setColour(juce::Label::backgroundColourId, buttonColor);
-    value.setColour(juce::Label::backgroundColourId, buttonColor);
+        // If the new selection is "inversion", ensure ValueTree reflects this.
+        if (control == "inversion") {
+            if (!(bool)appState.getProperty(IDs::INVERSION_SELECTED, false)) {
+                appState.setProperty(IDs::INVERSION_SELECTED, true, nullptr);
+            }
+        }
+        // If "inversion" was previously selected, and now something else is, deselect inversion in ValueTree.
+        else if (oldSelectedControl == "inversion") {
+            if ((bool)appState.getProperty(IDs::INVERSION_SELECTED, false)) {
+                appState.setProperty(IDs::INVERSION_SELECTED, false, nullptr);
+            }
+        }
+        // Note: valueTreePropertyChanged will handle visual updates for inversion labels.
+        // For other controls, direct visual updates might still be needed here or by them listening to selectedControl.
+        // For now, let's ensure toggleSelection handles this logic.
+    }
+}
+
+
+// toggleSelection now updates the ValueTree
+void SettingsPanelXLComponent::toggleSelection(const juce::String& control)
+{
+    juce::String previouslySelectedControl = selectedControl;
+
+    if (selectedControl == control) // Clicking the same control again
+    {
+        selectedControl = ""; // Deselect it (UI tracking)
+        if (control == "inversion") {
+            appState.setProperty(IDs::INVERSION_SELECTED, false, nullptr); // Update ValueTree
+        }
+    }
+    else // Clicking a new control
+    {
+        selectedControl = control; // Select it (UI tracking)
+        if (control == "inversion") {
+            appState.setProperty(IDs::INVERSION_SELECTED, true, nullptr); // Update ValueTree
+        } else {
+            // If a non-inversion control is selected, ensure inversion is marked as not selected in ValueTree
+            if ((bool)appState.getProperty(IDs::INVERSION_SELECTED, false)) {
+                appState.setProperty(IDs::INVERSION_SELECTED, false, nullptr);
+            }
+        }
+    }
+
+    // If the previously selected control was "inversion" and it's no longer the current (or any) selection,
+    // ensure its ValueTree state is false, unless the current selection IS "inversion".
+    if (previouslySelectedControl == "inversion" && selectedControl != "inversion") {
+        if ((bool)appState.getProperty(IDs::INVERSION_SELECTED, false)) {
+             appState.setProperty(IDs::INVERSION_SELECTED, false, nullptr);
+        }
+    }
+
+    // Visual updates for non-inversion labels (key, octave)
+    auto updateLabelPairVisuals = [this](juce::Label& label, juce::Label& value, const juce::String& ctrlName) {
+        bool isSelected = selectedControl == ctrlName; // Based on internal selectedControl
+        
+        label.setColour(juce::Label::backgroundColourId, buttonColor);
+        value.setColour(juce::Label::backgroundColourId, buttonColor);
+        if (isSelected) {
+            label.setColour(juce::Label::outlineColourId, selectedBorder);
+            value.setColour(juce::Label::outlineColourId, selectedBorder);
+            label.setBorderSize(juce::BorderSize<int>(2));
+            value.setBorderSize(juce::BorderSize<int>(2));
+            label.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
+            value.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
+        } else {
+            label.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
+            value.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
+            label.setBorderSize(juce::BorderSize<int>(0));
+            value.setBorderSize(juce::BorderSize<int>(0));
+        }
+        label.repaint();
+        value.repaint();
+    };
+
+    updateLabelPairVisuals(keyLabel, keyValueLabel, "key");
+    updateLabelPairVisuals(octaveLabel, octaveValueLabel, "octave");
+    // Inversion label visuals are handled by valueTreePropertyChanged.
+
+    modeSelector.getProperties().set("isSelected", selectedControl == "mode");
+    modeSelector.repaint();
+
+    std::cout << "Selected control (UI): " << (selectedControl.isEmpty() ? "none" : selectedControl) << std::endl;
+}
+
+
+// setInversionValue now updates the ValueTree
+void SettingsPanelXLComponent::setInversionValue(int newValue)
+{
+    if (!appState.isValid()) return;
+    if ((int)appState.getProperty(IDs::INVERSION_VALUE, 0) != newValue)
+    {
+        appState.setProperty(IDs::INVERSION_VALUE, newValue, nullptr);
+    }
+}
+
+// valueTreePropertyChanged implementation
+void SettingsPanelXLComponent::valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property)
+{
+    if (treeWhosePropertyHasChanged == appState)
+    {
+        if (property == IDs::INVERSION_SELECTED)
+        {
+            bool isSelectedFromState = appState.getProperty(IDs::INVERSION_SELECTED, false);
+            int val = appState.getProperty(IDs::INVERSION_VALUE, 0);
+
+            // Update visual state for inversion labels
+            // Visual selection should depend on BOTH appState's INVERSION_SELECTED AND internal `selectedControl`
+            bool showVisualSelection = isSelectedFromState && (selectedControl == "inversion");
+
+            inversionLabel.setColour(juce::Label::backgroundColourId, buttonColor);
+            inversionValueLabel.setColour(juce::Label::backgroundColourId, buttonColor);
+
+            if (showVisualSelection)
+            {
+                inversionLabel.setColour(juce::Label::outlineColourId, selectedBorder);
+                inversionValueLabel.setColour(juce::Label::outlineColourId, selectedBorder);
+                inversionLabel.setBorderSize(juce::BorderSize<int>(2));
+                inversionValueLabel.setBorderSize(juce::BorderSize<int>(2));
+                inversionLabel.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
+                inversionValueLabel.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
+            }
+            else
+            {
+                inversionLabel.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
+                inversionValueLabel.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
+                inversionLabel.setBorderSize(juce::BorderSize<int>(0));
+                inversionValueLabel.setBorderSize(juce::BorderSize<int>(0));
+            }
+            inversionLabel.repaint();
+            inversionValueLabel.repaint();
+
+            listeners.call([isSelectedFromState, val](Listener& l) { l.inversionSelectionChanged(isSelectedFromState, val); });
+            std::cout << "VT: INVERSION_SELECTED changed to: " << isSelectedFromState << std::endl;
+        }
+        else if (property == IDs::INVERSION_VALUE)
+        {
+            int newValue = appState.getProperty(IDs::INVERSION_VALUE, 0);
+            inversionValueLabel.setText(juce::String(newValue), juce::dontSendNotification);
+
+            bool isSelectedFromState = appState.getProperty(IDs::INVERSION_SELECTED, false);
+            if (isSelectedFromState)
+            {
+                 listeners.call([isSelectedFromState, newValue](Listener& l) { l.inversionSelectionChanged(isSelectedFromState, newValue); });
+            }
+            std::cout << "VT: INVERSION_VALUE changed to: " << newValue << std::endl;
+        }
+    }
 }
 
 void SettingsPanelXLComponent::mouseDown(const juce::MouseEvent& event)
 {
     auto* clickedComponent = event.eventComponent;
-    
-    // Check if we clicked on a label or its value
+
     if (auto* label = dynamic_cast<juce::Label*>(clickedComponent))
     {
-        // Get the control name for the clicked label
         juce::String controlName;
-        
+
         if (label == &keyLabel || label == &keyValueLabel)
             controlName = "key";
         else if (label == &octaveLabel || label == &octaveValueLabel)
@@ -142,88 +307,6 @@ void SettingsPanelXLComponent::mouseDown(const juce::MouseEvent& event)
     }
 }
 
-void SettingsPanelXLComponent::toggleSelection(const juce::String& control)
-{
-    // If clicking the same control, deselect it
-    if (selectedControl == control)
-    {
-        selectedControl = "";
-        if (control == "inversion")
-        {
-            isInversionSelected = false;
-            // Broadcast deselection
-            listeners.call([this](Listener& l) { l.inversionSelectionChanged(false, currentInversionValue); });
-        }
-    }
-    // If clicking a different control, select it
-    else
-    {
-        selectedControl = control;
-        if (control == "inversion")
-        {
-            isInversionSelected = true;
-            // Broadcast selection
-            listeners.call([this](Listener& l) { l.inversionSelectionChanged(true, currentInversionValue); });
-        }
-    }
-
-    // Update visual state for labels
-    auto updateLabelPair = [this](juce::Label& label, juce::Label& value, const juce::String& controlName) {
-        bool isSelected = selectedControl == controlName;
-        
-        // Set background color
-        label.setColour(juce::Label::backgroundColourId, buttonColor);
-        value.setColour(juce::Label::backgroundColourId, buttonColor);
-
-        // Set border color and thickness
-        if (isSelected)
-        {
-            label.setColour(juce::Label::outlineColourId, selectedBorder);
-            value.setColour(juce::Label::outlineColourId, selectedBorder);
-            label.setBorderSize(juce::BorderSize<int>(2));
-            value.setBorderSize(juce::BorderSize<int>(2));
-            
-            // Add hover effect for selected state
-            label.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
-            value.setColour(juce::Label::backgroundColourId, buttonColor.brighter(0.1f));
-        }
-        else
-        {
-            label.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
-            value.setColour(juce::Label::outlineColourId, juce::Colours::transparentBlack);
-            label.setBorderSize(juce::BorderSize<int>(0));
-            value.setBorderSize(juce::BorderSize<int>(0));
-        }
-    };
-
-    // Update all controls
-    updateLabelPair(keyLabel, keyValueLabel, "key");
-    updateLabelPair(octaveLabel, octaveValueLabel, "octave");
-    updateLabelPair(inversionLabel, inversionValueLabel, "inversion");
-
-    // Update mode selector
-    modeSelector.getProperties().set("isSelected", selectedControl == "mode");
-    modeSelector.repaint();
-
-    repaint();
-    std::cout << "Selected control: " << (selectedControl.isEmpty() ? "none" : selectedControl) << std::endl;
-}
-
-void SettingsPanelXLComponent::setInversionValue(int newValue)
-{
-    if (currentInversionValue != newValue)
-    {
-        currentInversionValue = newValue;
-        inversionValueLabel.setText(juce::String(newValue), juce::dontSendNotification);
-        
-        // Broadcast value change if selected
-        if (isInversionSelected)
-        {
-            listeners.call([this](Listener& l) { l.inversionSelectionChanged(true, currentInversionValue); });
-        }
-    }
-}
-
 void SettingsPanelXLComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 {
     if (comboBoxThatHasChanged == &modeSelector)
@@ -232,26 +315,27 @@ void SettingsPanelXLComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasCh
     }
 }
 
-SettingsPanelXLComponent::~SettingsPanelXLComponent()
+void SettingsPanelXLComponent::createSelectableContainer(juce::Label& label, juce::Label& value, const juce::String& controlName)
 {
-    instrumentSelector.setLookAndFeel(nullptr);
-    modeSelector.setLookAndFeel(nullptr);
-    modeSelector.removeListener(this);
+    label.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    value.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    label.setInterceptsMouseClicks(true, false);
+    value.setInterceptsMouseClicks(true, false);
+    label.setName(controlName);
+    value.setName(controlName);
+    label.setColour(juce::Label::backgroundColourId, buttonColor);
+    value.setColour(juce::Label::backgroundColourId, buttonColor);
 }
 
 void SettingsPanelXLComponent::paint(juce::Graphics& g)
 {
-    // Draw the panel background with rounded corners
     g.setColour(backgroundColor);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), cornerRadius);
-
-    // Draw icons
     auto drawIcon = [&](const juce::Rectangle<float>& bounds, const juce::String& text, const juce::Colour& iconColor) {
         g.setColour(iconColor);
         g.setFont(displayFont);
         g.drawText(text, bounds, juce::Justification::centred);
     };
-
     drawIcon(eyeButton.getBounds().toFloat(), String::fromUTF8("\xF0\x9F\x91\x81"), textColor);
     drawIcon(skinButton.getBounds().toFloat(), String::fromUTF8("\xE2\x86\x91"), textColor);
     drawIcon(memoryButton.getBounds().toFloat(), String::fromUTF8("\xF0\x9F\x96\xAB"), textColor);
@@ -264,8 +348,6 @@ void SettingsPanelXLComponent::resized()
     auto bounds = getLocalBounds();
     const float padding = 11.0f;
     float x = padding + 45.0f;
-
-    // Layout circular buttons
     auto layoutCircularButton = [&](IconButton& button) {
         button.setBounds(
             static_cast<int>(x),
@@ -275,18 +357,14 @@ void SettingsPanelXLComponent::resized()
         );
         x += circularButtonSize + padding;
     };
-
     layoutCircularButton(eyeButton);
     layoutCircularButton(skinButton);
     layoutCircularButton(memoryButton);
     layoutCircularButton(disableButton);
     layoutCircularButton(bassOffsetButton);
-
-    // Layout combo boxes
     const float comboWidth = 132.0f;
     const float comboHeight = 50.6f;
     const float comboY = (panelHeight - comboHeight) / 2;
-
     instrumentSelector.setBounds(
         static_cast<int>(x),
         static_cast<int>(comboY),
@@ -294,14 +372,11 @@ void SettingsPanelXLComponent::resized()
         static_cast<int>(comboHeight)
     );
     x += comboWidth + padding;
-
-    // Layout key labels
     const float keyWidth = 66.0f;
     const float labelHeight = 16.5f;
     const float valueHeight = 27.5f;
     const float totalHeight = labelHeight + valueHeight;
     const float labelY = (panelHeight - totalHeight) / 2;
-
     auto layoutStackedLabels = [&](juce::Label& label, juce::Label& value, float width) {
         label.setBounds(
             static_cast<int>(x),
@@ -309,7 +384,6 @@ void SettingsPanelXLComponent::resized()
             static_cast<int>(width),
             static_cast<int>(labelHeight)
         );
-
         value.setBounds(
             static_cast<int>(x),
             static_cast<int>(labelY + labelHeight),
@@ -318,9 +392,7 @@ void SettingsPanelXLComponent::resized()
         );
         x += width + padding;
     };
-
     layoutStackedLabels(keyLabel, keyValueLabel, keyWidth);
-
     modeSelector.setBounds(
         static_cast<int>(x),
         static_cast<int>(comboY),
@@ -328,27 +400,21 @@ void SettingsPanelXLComponent::resized()
         static_cast<int>(comboHeight)
     );
     x += 88.0f + padding;
-
-    // Layout octave and inversion labels
     const float numberWidth = 66.0f;
     layoutStackedLabels(octaveLabel, octaveValueLabel, numberWidth);
     layoutStackedLabels(inversionLabel, inversionValueLabel, numberWidth);
-
-    // Position chord label and display
-    float chordLabelX = x - 20.0f; // Keep CHORD label at current position
-    float chordDisplayX = x - 45.0f; // Move C# display further left by 25px
-    
+    float chordLabelX = x - 20.0f;
+    float chordDisplayX = x - 45.0f;
     chordLabel.setBounds(
         static_cast<int>(chordLabelX),
         static_cast<int>(labelY),
         static_cast<int>(numberWidth),
         static_cast<int>(labelHeight)
     );
-
     chordDisplay.setBounds(
         static_cast<int>(chordDisplayX),
         static_cast<int>(labelY + labelHeight),
         static_cast<int>(numberWidth * 2),
         static_cast<int>(valueHeight)
     );
-} 
+}
