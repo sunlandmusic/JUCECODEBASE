@@ -4,6 +4,7 @@
 #include "PianoKeyComponent.h" 
 #include "TitleComponent.h"
 #include "VerticalFaderComponent.h"
+#include "Identifiers.h" // Include the new identifiers
 #include "SettingsPanelXLComponent.h"
 
 //==============================================================================
@@ -23,6 +24,9 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void inversionSelectionChanged(bool isSelected, int value) override;
+
+    // Method to get the ValueTree (e.g., for AudioProcessor)
+    juce::ValueTree& getAppState() { return appState; }
 
 private:
     //==============================================================================
@@ -79,6 +83,11 @@ private:
     ButtonLookAndFeel buttonLookAndFeel;
     juce::TextButton plusButton;
     juce::TextButton minusButton;
+
+    juce::ValueTree appState; // The application state ValueTree
+
+    bool isInvSelected = false;
+    int currentInvValue = 0; // To track the value from settingsPanel for plus/minus actions
 
     // Piano Keys
     std::vector<std::unique_ptr<PianoKeyComponent>> whiteKeys;

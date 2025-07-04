@@ -2,10 +2,12 @@
 
 #include <JuceHeader.h>
 #include "IconButton.h"
+#include "Identifiers.h" // Include the new identifiers
 #include "CustomLookAndFeel.h"
 
 class SettingsPanelXLComponent : public juce::Component,
-                                private juce::ComboBox::Listener
+                                private juce::ComboBox::Listener, // For modeSelector
+                                public juce::ValueTree::Listener // To listen to appState changes
 {
 public:
     // Add a listener class for broadcasting selection changes
@@ -19,17 +21,22 @@ public:
     void addListener(Listener* l) { listeners.add(l); }
     void removeListener(Listener* l) { listeners.remove(l); }
 
-    SettingsPanelXLComponent();
+    SettingsPanelXLComponent(juce::ValueTree applicationState); // Modified constructor
     ~SettingsPanelXLComponent() override;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& event) override;
 
-    // Add methods to handle button selection
+    // Methods to handle button selection (selectedControl is internal UI state)
     void setSelectedControl(const juce::String& control);
     juce::String getSelectedControl() const { return selectedControl; }
+
+    // Method to set inversion value (called by MainComponent's plus/minus)
+    // This will update the ValueTree, which then updates the UI via valueTreePropertyChanged
     void setInversionValue(int newValue);
+    // Method to get current inversion value (mainly for MainComponent's initial query if needed)
+    int getInversionValue() const;
 
 private:
     // ComboBox::Listener
@@ -47,11 +54,13 @@ private:
     const juce::Colour buttonBorder = juce::Colour::fromFloatRGBA(0.5f, 0.5f, 0.5f, 0.5f);
     const juce::Colour selectedBorder = juce::Colour::fromFloatRGBA(0.4f, 0.4f, 0.4f, 0.8f);
     
-    // Track which control is currently selected
+    juce::ValueTree appState; // Reference to the application state
+
+    // Track which control is currently selected (internal UI state, not directly in ValueTree for now)
     juce::String selectedControl;
-    bool isMusicModeSelected = false;
-    bool isInversionSelected = false;
-    int currentInversionValue = 0;
+    // bool isMusicModeSelected = false; // This can be derived or also put in ValueTree later
+    // bool isInversionSelected = false; // This will come from appState
+    // int currentInversionValue = 0; // This will come from appState
     juce::ListenerList<Listener> listeners;
 
     // Helper method to create a selectable label container
@@ -62,6 +71,13 @@ private:
     
     // Helper method to toggle selection
     void toggleSelection(const juce::String& control);
+
+    // ValueTree::Listener methods
+    void valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property) override;
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override {}
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override {}
+    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override {}
+    void valueTreeParentChanged (juce::ValueTree&) override {}
     
     // All buttons from left to right
     IconButton eyeButton;                // 1. Eye icon
